@@ -52,6 +52,8 @@ public class FeedCleaner {
 
 	private static final String FEED_DAYS_OLD = "feed.days_old";
 
+	private static final String DEBUG_MODE = "debugMode";
+
 	private List<String> ignoreList;
 
 	private PropertiesConfiguration config;
@@ -144,8 +146,14 @@ public class FeedCleaner {
 				// Check File Age
 				if (this.fileIsStale(file)) {
 					// Delete File
-					// ftpClient.deleteFile(fileName);
-					LOGGER.info("Deleted File: " + fileName);
+					String debugMode = this.config.getString(DEBUG_MODE);
+					if (debugMode.equals("false")) {
+						ftpClient.delete(fileName);
+						LOGGER.info("Deleted File: " + fileName);
+					}else{
+						LOGGER.info("Deleted File (DEBUG): " + fileName);
+					}
+					
 				} else {
 					LOGGER.info("Skipped File (Not Stale): " + fileName);
 				}
