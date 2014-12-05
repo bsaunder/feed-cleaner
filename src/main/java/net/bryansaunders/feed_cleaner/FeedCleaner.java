@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.net.SocketException;
 import java.text.DateFormat;
 import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Iterator;
@@ -35,8 +36,7 @@ import com.enterprisedt.net.ftp.FTPFile;
  */
 public class FeedCleaner {
 
-	private static final Logger LOGGER = LogManager
-			.getLogger(FeedCleaner.class);
+	private static final Logger LOGGER = LogManager.getLogger(FeedCleaner.class);
 
 	private static final String CONFIG_FILE = "feedCleaner.properties";
 
@@ -75,24 +75,16 @@ public class FeedCleaner {
 			fc.configure();
 			fc.cleanFeeds();
 		} catch (ConfigurationException ce) {
-			LOGGER.error(
-					"An Error Occured Configuring the Feed Cleaner, Exiting.",
-					ce);
+			LOGGER.error("An Error Occured Configuring the Feed Cleaner, Exiting.", ce);
 			exitCode = 1;
 		} catch (IOException ioe) {
-			LOGGER.error(
-					"An IO Error Occured Communicating with the Server, Exiting.",
-					ioe);
+			LOGGER.error("An IO Error Occured Communicating with the Server, Exiting.", ioe);
 			exitCode = 2;
 		} catch (FTPException e) {
-			LOGGER.error(
-					"A FTP Error Occured Communicting with the Server, Exiting.",
-					e);
+			LOGGER.error("A FTP Error Occured Communicting with the Server, Exiting.", e);
 			exitCode = 3;
 		} catch (ParseException e) {
-			LOGGER.error(
-					"A Parse Error Occured Communicting with the Server, Exiting.",
-					e);
+			LOGGER.error("A Parse Error Occured Communicting with the Server, Exiting.", e);
 			exitCode = 4;
 		}
 
@@ -108,8 +100,7 @@ public class FeedCleaner {
 	 * @throws FTPException
 	 * @throws ParseException
 	 */
-	private void cleanFeeds() throws SocketException, IOException,
-			FTPException, ParseException {
+	private void cleanFeeds() throws SocketException, IOException, FTPException, ParseException {
 		FTPClient ftpClient = this.createFtpClient();
 
 		this.connectToServer(ftpClient);
@@ -117,49 +108,91 @@ public class FeedCleaner {
 		this.disconnectServer(ftpClient);
 	}
 
-	private void listAndRemoveFeeds(FTPClient ftpClient) throws IOException,
-			FTPException, ParseException {
+	private void listAndRemoveFeeds(FTPClient ftpClient) throws IOException, FTPException, ParseException {
 		LOGGER.info("Getting File List...");
 		String directory = this.config.getString(FEED_DIRECTORY);
+
+		processDirectory(ftpClient, directory);
+
+		LOGGER.info("File Check Complete.");
+	}
+
+	private void processDirectory(FTPClient ftpClient, String directory) throws IOException, FTPException, ParseException {
+		LOGGER.info("Proccesing Directory: " + directory);
+
 		FTPFile[] files = ftpClient.dirDetails(directory);
-
-		LOGGER.info("Checking Files...");
-		for (FTPFile file : files) {
-
-			// Check for File Type
-			if (!file.isDir()) {
+		if (files.length > 2) {
+			for (FTPFile file : files) {
 				String fileName = file.getName();
+				String fullFileName = directory + "/" + fileName;
 
-				// Print File Info
-				if (LOGGER.isDebugEnabled()) {
-					Date timestampDate = this.getDateFromFileName(fileName);
-					String timestamp = DateFormat.getDateTimeInstance().format(
-							timestampDate);
-					LOGGER.debug("File: " + fileName + " : " + timestamp);
-				}
+				// Check for File Type
+				if (!file.isDir()) {
 
-				if (this.ignoreList.contains(fileName)) {
-					LOGGER.info("Skipped File (Ignored): " + fileName);
-					continue;
-				}
-
-				// Check File Age
-				if (this.fileIsStale(file)) {
-					// Delete File
-					String debugMode = this.config.getString(DEBUG_MODE);
-					if (debugMode.equals("false")) {
-						ftpClient.delete(fileName);
-						LOGGER.info("Deleted File: " + fileName);
-					}else{
-						LOGGER.info("Deleted File (DEBUG): " + fileName);
+					// Print File Info
+					if (LOGGER.isDebugEnabled()) {
+						Date timestampDate = this.getDateFromFileName(fileName);
+						String timestamp = DateFormat.getDateTimeInstance().format(timestampDate);
+						LOGGER.debug("File: " + fileName + " : " + timestamp);
 					}
-					
+
+					if (this.ignoreList.contains(fileName)) {
+						LOGGER.info("Skipped File (Ignored): " + fileName);
+						continue;
+					}
+
+					// Check File Age
+					String debugMode = this.config.getString(DEBUG_MODE);
+					if (this.fileIsStale(file)) {
+						// Delete File
+						if (debugMode.equals("false")) {
+							ftpClient.delete(fullFileName);
+							LOGGER.info("Deleted File: " + fileName);
+						} else {
+							LOGGER.info("Deleted File (DEBUG): " + fileName);
+						}
+
+					} else {
+						String feedDirectory = this.config.getString(FEED_DIRECTORY);
+						if (directory.equals(feedDirectory)) {
+							// Build New Directory
+							Date fileDate = this.getDateFromFileName(fileName);
+							String year = new SimpleDateFormat("yyyy").format(fileDate);
+							String month = new SimpleDateFormat("MM").format(fileDate);
+							String day = new SimpleDateFormat("dd").format(fileDate);
+
+							if (debugMode.equals("false")) {
+
+								this.createDirectory(ftpClient, feedDirectory + "/" + year);
+								this.createDirectory(ftpClient, feedDirectory + "/" + year + "/" + month);
+								this.createDirectory(ftpClient, feedDirectory + "/" + year + "/" + month + "/" + day);
+								ftpClient.rename(fullFileName, feedDirectory + "/" + year + "/" + month + "/" + day + "/" + fileName);
+								LOGGER.info("Moved File: " + fileName);
+							} else {
+								LOGGER.info("Moved File (DEBUG): " + fileName);
+							}
+						}
+					}
 				} else {
-					LOGGER.info("Skipped File (Not Stale): " + fileName);
+					if (fileName.matches("[0-9]{2,4}")) {
+						this.processDirectory(ftpClient, fullFileName);
+					}
 				}
 			}
+		} else {
+			// Empty Directories have 2 Files, "." and ".."
+			ftpClient.rmdir(directory);
+			LOGGER.info("Removing Empty Directory: " + directory);
 		}
-		LOGGER.info("File Check Complete.");
+	}
+
+	private void createDirectory(FTPClient ftpClient, String directory) throws IOException {
+		try {
+			ftpClient.mkdir(directory);
+		} catch (FTPException fe) {
+			// Ignore the Errors Because the Directories already
+			// exist.
+		}
 	}
 
 	private boolean fileIsStale(FTPFile file) {
@@ -175,8 +208,7 @@ public class FeedCleaner {
 		}
 
 		if (LOGGER.isDebugEnabled()) {
-			LOGGER.debug(file.getName() + " is " + age + " Days Old, Stale: "
-					+ isStale);
+			LOGGER.debug(file.getName() + " is " + age + " Days Old, Stale: " + isStale);
 		}
 
 		return isStale;
@@ -185,26 +217,17 @@ public class FeedCleaner {
 	private Date getDateFromFileName(String name) {
 		Date date = new Date();
 		try {
-			Pattern nameRegex = Pattern
-					.compile(
-							"([a-z-_]*)\\.([0-9]{4})([0-9]{2})([0-9]{2})_([0-9]{2})([0-9]{2})([0-9]{2})\\.mp4",
-							Pattern.CANON_EQ);
+			Pattern nameRegex = Pattern.compile("([a-z-_]*)\\.([0-9]{4})([0-9]{2})([0-9]{2})_([0-9]{2})([0-9]{2})([0-9]{2})\\.mp4", Pattern.CANON_EQ);
 			Matcher nameRegexMatcher = nameRegex.matcher(name);
 			boolean nameMatched = nameRegexMatcher.find();
 			if (nameMatched) {
 				Calendar cal = Calendar.getInstance();
-				cal.set(Calendar.YEAR,
-						Integer.valueOf(nameRegexMatcher.group(2)));
-				cal.set(Calendar.MONTH,
-						Integer.valueOf(nameRegexMatcher.group(3)) - 1);
-				cal.set(Calendar.DAY_OF_MONTH,
-						Integer.valueOf(nameRegexMatcher.group(4)));
-				cal.set(Calendar.HOUR_OF_DAY,
-						Integer.valueOf(nameRegexMatcher.group(5)));
-				cal.set(Calendar.MINUTE,
-						Integer.valueOf(nameRegexMatcher.group(6)));
-				cal.set(Calendar.SECOND,
-						Integer.valueOf(nameRegexMatcher.group(7)));
+				cal.set(Calendar.YEAR, Integer.valueOf(nameRegexMatcher.group(2)));
+				cal.set(Calendar.MONTH, Integer.valueOf(nameRegexMatcher.group(3)) - 1);
+				cal.set(Calendar.DAY_OF_MONTH, Integer.valueOf(nameRegexMatcher.group(4)));
+				cal.set(Calendar.HOUR_OF_DAY, Integer.valueOf(nameRegexMatcher.group(5)));
+				cal.set(Calendar.MINUTE, Integer.valueOf(nameRegexMatcher.group(6)));
+				cal.set(Calendar.SECOND, Integer.valueOf(nameRegexMatcher.group(7)));
 				date = cal.getTime();
 			}
 		} catch (PatternSyntaxException e) {
@@ -213,15 +236,13 @@ public class FeedCleaner {
 		return date;
 	}
 
-	private void disconnectServer(FTPClient ftpClient) throws FTPException,
-			IOException {
+	private void disconnectServer(FTPClient ftpClient) throws FTPException, IOException {
 		LOGGER.info("Disconnecting from Server...");
 		ftpClient.quit();
 		LOGGER.info("Server Disconnected.");
 	}
 
-	private void connectToServer(FTPClient ftpClient) throws SocketException,
-			IOException, FTPException {
+	private void connectToServer(FTPClient ftpClient) throws SocketException, IOException, FTPException {
 		LOGGER.info("Opening Connection to Server...");
 		String hostname = this.config.getString(FTP_HOSTNAME);
 		Integer port = this.config.getInt(FTP_PORT);
