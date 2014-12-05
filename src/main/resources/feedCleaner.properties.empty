@@ -1,0 +1,7 @@
+ftp.host=www.someserver.com
+ftp.port=21
+ftp.username=USERNAME
+ftp.password=PASSWORD
+feed.directory=/some/server/folder
+feed.days_old=15
+debugMode=false
