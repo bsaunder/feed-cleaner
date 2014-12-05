@@ -88,6 +88,7 @@ public class FeedCleaner {
      */
     private void cleanFeeds() throws SocketException, IOException {
         FTPClient ftpClient = this.createFtpClient();
+        
         this.connectToServer(ftpClient);
         this.openFeedDirectory(ftpClient);
         this.listAndRemoveFeeds(ftpClient);
@@ -107,6 +108,10 @@ public class FeedCleaner {
 
     private void listAndRemoveFeeds(FTPClient ftpClient) throws IOException {
         LOGGER.info("Getting File List...");
+        if(LOGGER.isDebugEnabled()){
+        	LOGGER.debug("Current Directory: " + ftpClient.printWorkingDirectory());
+        }
+        ftpClient.setFileType(FTPClient.BINARY_FILE_TYPE);
         FTPListParseEngine engine = ftpClient.initiateListParsing("net.bryansaunders.feed_cleaner.Mp4FileParser", ".");
 
         LOGGER.info("Checking Files...");
@@ -135,7 +140,7 @@ public class FeedCleaner {
                     // Check File Age
                     if (this.fileIsStale(file)) {
                         // Delete File
-                        ftpClient.deleteFile(fileName);
+                        //ftpClient.deleteFile(fileName);
                         LOGGER.info("Deleted File: " + fileName);
                     }else{
                         LOGGER.info("Skipped File (Not Stale): " + fileName);
